@@ -109,8 +109,9 @@ export const CLAUDE_PROFILE_URL = 'https://api.anthropic.com/api/oauth/profile';
 
 export const CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 
+// /api/oauth/usage answers 429 rate_limit_error to claude-cli/* user agents, but not to claude-code/*.
 export const CLAUDE_REQUEST_HEADERS = {
-  'User-Agent': 'claude-cli/2.1.280 (external, cli)',
+  'User-Agent': 'claude-code/2.1.280',
   Authorization: 'Bearer $TOKEN$',
   'Content-Type': 'application/json',
   'anthropic-beta': 'oauth-2025-04-20',

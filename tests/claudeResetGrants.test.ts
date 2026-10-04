@@ -98,7 +98,7 @@ test('exact proxied GET/profile/claim contract, no provider token in frontend', 
     expect(call.authIndex).toBe('index');
     expect(call.header?.Authorization).toBe('Bearer $TOKEN$');
     expect(call.header?.['anthropic-beta']).toBe('oauth-2025-04-20');
-    expect(call.header?.['User-Agent']).toBe('claude-cli/2.1.280 (external, cli)');
+    expect(call.header?.['User-Agent']).toBe('claude-code/2.1.280');
   }
 });
 
