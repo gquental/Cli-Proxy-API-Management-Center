@@ -1,0 +1,106 @@
+name: Release patched panel
+
+# CLIProxyAPI pulls management.html from the latest release of this repository
+# (management.panel-github-repository). Each run rebuilds the latest upstream release
+# with this branch's commits on top, so upstream updates keep flowing in.
+
+on:
+  schedule:
+    - cron: '41 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-patched-panel
+
+env:
+  UPSTREAM_REPO: router-for-me/Cli-Proxy-API-Management-Center
+  GH_REPO: ${{ github.repository }}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout patch branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve upstream release
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          upstream_tag="$(gh api "repos/${UPSTREAM_REPO}/releases/latest" --jq .tag_name)"
+          git fetch --no-tags "https://github.com/${UPSTREAM_REPO}.git" \
+            "refs/tags/${upstream_tag}:refs/tags/${upstream_tag}"
+          release_tag="${upstream_tag}-quental.$(git rev-parse --short=7 HEAD)"
+          exists=false
+          if gh release view "${release_tag}" >/dev/null 2>&1; then exists=true; fi
+          {
+            echo "upstream_tag=${upstream_tag}"
+            echo "release_tag=${release_tag}"
+            echo "exists=${exists}"
+          } >> "$GITHUB_OUTPUT"
+          echo "upstream ${upstream_tag}, release ${release_tag}, exists=${exists}"
+
+      - name: Rebase patches onto upstream release
+        if: steps.plan.outputs.exists == 'false'
+        env:
+          UPSTREAM_TAG: ${{ steps.plan.outputs.upstream_tag }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rebase "${UPSTREAM_TAG}"
+          git log --oneline "${UPSTREAM_TAG}..HEAD"
+
+      - name: Setup Node.js
+        if: steps.plan.outputs.exists == 'false'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Setup Bun
+        if: steps.plan.outputs.exists == 'false'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      # Upstream's own suite is not green on every release, so gate on the tests this branch
+      # adds or changes, plus the typecheck and build that upstream's release runs.
+      - name: Test patches, build
+        if: steps.plan.outputs.exists == 'false'
+        env:
+          UPSTREAM_TAG: ${{ steps.plan.outputs.upstream_tag }}
+          VERSION: ${{ steps.plan.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          bun install --frozen-lockfile
+          mapfile -t patch_tests < <(git diff --name-only --diff-filter=AM "${UPSTREAM_TAG}..HEAD" -- 'tests/*.test.ts')
+          if [ "${#patch_tests[@]}" -gt 0 ]; then bun test "${patch_tests[@]}"; fi
+          bun run build
+          mv dist/index.html dist/management.html
+
+      - name: Publish release
+        if: steps.plan.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_TAG: ${{ steps.plan.outputs.upstream_tag }}
+          RELEASE_TAG: ${{ steps.plan.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          {
+            echo "Upstream ${UPSTREAM_REPO}@${UPSTREAM_TAG} with these commits on top:"
+            echo
+            git log --pretty=format:'- %s' "${UPSTREAM_TAG}..HEAD"
+          } > release-notes.md
+          gh release create "${RELEASE_TAG}" dist/management.html \
+            --target "${GITHUB_SHA}" \
+            --title "${RELEASE_TAG}" \
+            --notes-file release-notes.md \
+            --latest
